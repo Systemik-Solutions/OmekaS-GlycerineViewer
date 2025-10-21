@@ -1,0 +1,26 @@
+<?php
+
+$iiifManifestUrl = $block->dataValue('iiifManifestUrl');
+$width = $block->dataValue('width') ?: '100%';
+$height = $block->dataValue('height') ?: '500px';
+
+if (empty($iiifManifestUrl)) {
+    echo '<p>Please provide a IIIF Manifest URL in the block settings.</p>';
+    return;
+}
+
+// Generate a unique/random ID for this viewer instance.
+$viewerId = 'glycerine-viewer-' . uniqid();
+?>
+
+<div id="<?php echo $viewerId; ?>"></div>
+
+<script>
+    const ele = document.getElementById('<?php echo $viewerId; ?>');
+    const viewer = new GlycerineViewer(ele, {
+        width: '<?php echo $width; ?>',
+        height: '<?php echo $height; ?>',
+        manifest: '<?php echo $iiifManifestUrl; ?>',
+    });
+    viewer.init();
+</script>
