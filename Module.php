@@ -108,6 +108,13 @@ class Module extends AbstractModule
         );
     }
 
+    function isStrictHttpUrl(string $s): bool
+    {
+        $s = trim($s);
+        if (!preg_match('~^https?://~i', $s)) return false;        
+        return filter_var($s, FILTER_VALIDATE_URL) !== false;      
+    }
+
     public function appendIiifIframe(Event $event): void
     {
         $view = $event->getTarget();
@@ -115,41 +122,38 @@ class Module extends AbstractModule
         $resource = $event->getParam('resource');
         if (!$resource) {
             $vars = $view->vars();
-            if ($vars->offsetExists('resource')) {
-                $resource = $vars->offsetGet('resource');
-            } elseif ($vars->offsetExists('item')) {
-                $resource = $vars->offsetGet('item');
-            }
+            $resource = $vars->offsetExists('resource')
+                ? $vars->offsetGet('resource')
+                : ($vars->offsetExists('item') ? $vars->offsetGet('item') : null);
         }
+        if (!$resource) return;
 
-        if (!$resource) {
-            return;
-        }
 
-        // Get nominated property & settings.
         $services = $view->getHelperPluginManager()->getServiceLocator();
         $settings = $services->get('Omeka\Settings');
+
         $propTerm = (string) $settings->get('glycerine_iiif_manifest_external_property', '');
-        if ($propTerm === '') {
-            return;
-        }
+        if ($propTerm === '') return;
 
-        // Read the manifest URL from the item.
-        $manifestUrl = '';
-        if ($resource && $propTerm) {
-            $val = $resource->value($propTerm, ['all' => false]);
 
+        $values = $resource->value($propTerm, ['all' => true, 'default' => []]);
+
+        $manifestUrls = [];
+        foreach ((array) $values as $val) {
+            $raw = '';
             if ($val instanceof \Omeka\Api\Representation\ValueRepresentation) {
-                // If it’s a URI value, use uri(); else value()
-                $manifestUrl = $val->uri() ?: $val->value();
+                $raw = $val->uri() ?: $val->value();
             } else {
-                $manifestUrl = (string) $val;
+                $raw = (string) $val;
+            }
+            // skip non-URLs =
+            if ($raw && $this->isStrictHttpUrl($raw)) {
+                $manifestUrls[] = $raw;
             }
         }
 
-        if ($manifestUrl === '') {
-            return;
-        }
+        // If nothing usable, do nothing
+        if (!$manifestUrls) return;
 
         $width  = (string) $settings->get('giiif_iframe_width', '100%');
         $height = (string) $settings->get('giiif_iframe_height', '600px');
@@ -162,38 +166,35 @@ class Module extends AbstractModule
         //  2) Find a text node equal to the manifestUrl and replace its container
         //  3) If nothing found, do nothing 
         echo '<script>(function(){'
-            . 'var manifest=' . json_encode($manifestUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
-            . 'var width='    . json_encode($width,       JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
-            . 'var height='   . json_encode($height,      JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
-            . 'var viewerId=' . json_encode($viewerId,    JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
+            . 'var manifests=' . json_encode($manifestUrls, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
+            . 'var width='    . json_encode($width,  JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
+            . 'var height='   . json_encode($height, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
+            . 'var viewerId=' . json_encode($viewerId, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
 
             . 'function replaceAndInit(){'
-            // Strategy 1: find <a href="manifest">
-            . 'var sel=\'a[href="\'+manifest.replace(/"/g, "\\\\\"")+\'"]\';'
-            . 'var a=document.querySelector(sel);'
-            . 'var container=null;'
-            . 'if(a){container=a.closest(".values")||a.closest(".value")||a.parentElement;}'
-            // Strategy 2: find exact text node with manifest
-            . 'if(!container){'
-            . 'try{'
-            . 'var walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {'
-            . 'acceptNode:function(n){return (n.nodeValue||"").trim()===manifest?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;}'
+            . 'manifests.forEach(function(m){'
+            // find <a href="m"> and replace ONLY its .value container
+            . '  var sel=\'a[href="\'+String(m).replace(/"/g, "\\\\\"")+\'"]\';'
+            . '  document.querySelectorAll(sel).forEach(function(a){'
+            . '    var valueEl=a.closest(".value")||a.parentElement;'
+            . '    if(!valueEl) return;'
+            . '    var id=viewerId+"-"+Math.random().toString(36).slice(2);'
+            . '    valueEl.innerHTML = \'<div id="\'+id+\'"></div>\';'
+            . '    try{var ele=document.getElementById(id);var viewer=new GlycerineViewer(ele,{width:width,height:height,manifest:m});viewer.init();}catch(e){console.error("GlycerineViewer init error", e);}'
+            . '  });'
+            // find exact text nodes == m and replace ONLY that .value block
+            . '  try{'
+            . '    var walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {acceptNode:function(n){return (n.nodeValue||"").trim()===String(m)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;}});'
+            . '    var node;'
+            . '    while(node=walker.nextNode()){'
+            . '      var valueEl=(node.parentNode && node.parentNode.closest && node.parentNode.closest(".value"))||node.parentNode;'
+            . '      if(!valueEl) continue;'
+            . '      var id=viewerId+"-"+Math.random().toString(36).slice(2);'
+            . '      valueEl.innerHTML = \'<div id="\'+id+\'"></div>\';'
+            . '      try{var ele=document.getElementById(id);var viewer=new GlycerineViewer(ele,{width:width,height:height,manifest:m});viewer.init();}catch(e){console.error("GlycerineViewer init error", e);}'
+            . '    }'
+            . '  }catch(e){}'
             . '});'
-            . 'var node=walker.nextNode();'
-            . 'if(node){container=node.parentNode.closest(".values,.value,.property")||node.parentNode;}'
-            . '}catch(e){}'
-            . '}'
-            . 'if(!container){return;}'
-
-            // Replace with viewer div
-            . 'container.innerHTML = \'<div id="\'+viewerId+\'"></div>\';'
-
-            // Initialize GlycerineViewer on the new div
-            . 'try{'
-            . 'var ele=document.getElementById(viewerId);'
-            . 'var viewer=new GlycerineViewer(ele,{width:width,height:height,manifest:manifest});'
-            . 'viewer.init();'
-            . '}catch(e){console.error("GlycerineViewer init error", e);}'
             . '}'
             . '(document.readyState==="loading"?document.addEventListener("DOMContentLoaded",replaceAndInit):replaceAndInit());'
             . '})();</script>';
