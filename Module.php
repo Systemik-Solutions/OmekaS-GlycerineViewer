@@ -2,7 +2,6 @@
 
 namespace GlycerineIIIFViewer;
 
-use Error;
 use Omeka\Module\AbstractModule;
 use Laminas\View\Renderer\PhpRenderer;
 use Laminas\Mvc\Controller\AbstractController;
@@ -12,15 +11,29 @@ use Laminas\ServiceManager\ServiceLocatorInterface;
 use Laminas\EventManager\Event;
 use Laminas\EventManager\SharedEventManagerInterface;
 
+/**
+ * Embeds IIIF manifests in item pages and site blocks using Glycerine Viewer.
+ */
 class Module extends AbstractModule
 {
+    /** @var string Default viewer width. */
+    const DEFAULT_WIDTH = '100%';
 
+    /** @var string Default viewer height. */
+    const DEFAULT_HEIGHT = '600px';
+
+    /**
+     * @return array
+     */
     public function getConfig(): array
     {
         return include __DIR__ . '/config/module.config.php';
     }
 
-
+    /**
+     * @param PhpRenderer $renderer
+     * @return string
+     */
     public function getConfigForm(PhpRenderer $renderer)
     {
         // Fetch the main container via the view's HelperPluginManager
@@ -39,6 +52,10 @@ class Module extends AbstractModule
         return $renderer->formCollection($form);
     }
 
+    /**
+     * @param AbstractController $controller
+     * @return void
+     */
     public function handleConfigForm(AbstractController $controller)
     {
         $request = $controller->getRequest();
@@ -68,6 +85,10 @@ class Module extends AbstractModule
         );
     }
 
+    /**
+     * @param ServiceLocatorInterface $services
+     * @return void
+     */
     public function install(ServiceLocatorInterface $services): void
     {
         $services
@@ -75,6 +96,10 @@ class Module extends AbstractModule
             ->set('glycerine_iiif_manifest_external_property', '');
     }
 
+    /**
+     * @param ServiceLocatorInterface $services
+     * @return void
+     */
     public function uninstall(ServiceLocatorInterface $services): void
     {
         $services
@@ -82,7 +107,10 @@ class Module extends AbstractModule
             ->delete('glycerine_iiif_manifest_external_property');
     }
 
-
+    /**
+     * @param MvcEvent $event
+     * @return void
+     */
     public function onBootstrap(MvcEvent $event): void
     {
         // IMPORTANT: ensure base class runs (this is what normally calls attachListeners()).
@@ -93,12 +121,15 @@ class Module extends AbstractModule
         $headScript = $viewHelperManager->get('headScript');
         $headLink = $viewHelperManager->get('headLink');
 
-        // Glycerine Viewer
+      // Glycerine Viewer
         $headScript->appendFile('https://unpkg.com/glycerine-viewer@latest/jslib/glycerine-viewer.umd.cjs');
         $headLink->appendStylesheet('https://unpkg.com/glycerine-viewer@latest/jslib/style.css');
     }
 
-
+    /**
+     * @param SharedEventManagerInterface $sharedEventManager
+     * @return void
+     */
     public function attachListeners(SharedEventManagerInterface $sharedEventManager): void
     {
         $sharedEventManager->attach(
@@ -108,13 +139,23 @@ class Module extends AbstractModule
         );
     }
 
-    function isStrictHttpUrl(string $s): bool
+    /**
+     * @param string $s
+     * @return bool
+     */
+    private function isStrictHttpUrl(string $s): bool
     {
         $s = trim($s);
-        if (!preg_match('~^https?://~i', $s)) return false;        
-        return filter_var($s, FILTER_VALIDATE_URL) !== false;      
+        if (!preg_match('~^https?://~i', $s)) {
+            return false;
+        }
+        return filter_var($s, FILTER_VALIDATE_URL) !== false;
     }
 
+    /**
+     * @param Event $event
+     * @return void
+     */
     public function appendIiifIframe(Event $event): void
     {
         $view = $event->getTarget();
@@ -126,15 +167,17 @@ class Module extends AbstractModule
                 ? $vars->offsetGet('resource')
                 : ($vars->offsetExists('item') ? $vars->offsetGet('item') : null);
         }
-        if (!$resource) return;
-
+        if (!$resource) {
+            return;
+        }
 
         $services = $view->getHelperPluginManager()->getServiceLocator();
         $settings = $services->get('Omeka\Settings');
 
         $propTerm = (string) $settings->get('glycerine_iiif_manifest_external_property', '');
-        if ($propTerm === '') return;
-
+        if ($propTerm === '') {
+            return;
+        }
 
         $values = $resource->value($propTerm, ['all' => true, 'default' => []]);
 
@@ -146,57 +189,23 @@ class Module extends AbstractModule
             } else {
                 $raw = (string) $val;
             }
-            // skip non-URLs =
+            // Skip non-URLs
             if ($raw && $this->isStrictHttpUrl($raw)) {
                 $manifestUrls[] = $raw;
             }
         }
 
-        // If nothing usable, do nothing
-        if (!$manifestUrls) return;
-
-        $width  = (string) $settings->get('giiif_iframe_width', '100%');
-        $height = (string) $settings->get('giiif_iframe_height', '600px');
+        if (!$manifestUrls) {
+            return;
+        }
 
         $viewerId = 'glycerine-viewer-' . bin2hex(random_bytes(5));
 
-        // Inject JS that finds the existing rendered value and REPLACES it with the iframe.
-        // It tries a few strategies:
-        //  1) Find an <a href="manifestUrl"> and replace its nearest .values/.value container
-        //  2) Find a text node equal to the manifestUrl and replace its container
-        //  3) If nothing found, do nothing 
-        echo '<script>(function(){'
-            . 'var manifests=' . json_encode($manifestUrls, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
-            . 'var width='    . json_encode($width,  JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
-            . 'var height='   . json_encode($height, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
-            . 'var viewerId=' . json_encode($viewerId, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . ';'
-
-            . 'function replaceAndInit(){'
-            . 'manifests.forEach(function(m){'
-            // find <a href="m"> and replace ONLY its .value container
-            . '  var sel=\'a[href="\'+String(m).replace(/"/g, "\\\\\"")+\'"]\';'
-            . '  document.querySelectorAll(sel).forEach(function(a){'
-            . '    var valueEl=a.closest(".value")||a.parentElement;'
-            . '    if(!valueEl) return;'
-            . '    var id=viewerId+"-"+Math.random().toString(36).slice(2);'
-            . '    valueEl.innerHTML = \'<div id="\'+id+\'"></div>\';'
-            . '    try{var ele=document.getElementById(id);var viewer=new GlycerineViewer(ele,{width:width,height:height,manifest:m});viewer.init();}catch(e){console.error("GlycerineViewer init error", e);}'
-            . '  });'
-            // find exact text nodes == m and replace ONLY that .value block
-            . '  try{'
-            . '    var walker=document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {acceptNode:function(n){return (n.nodeValue||"").trim()===String(m)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT;}});'
-            . '    var node;'
-            . '    while(node=walker.nextNode()){'
-            . '      var valueEl=(node.parentNode && node.parentNode.closest && node.parentNode.closest(".value"))||node.parentNode;'
-            . '      if(!valueEl) continue;'
-            . '      var id=viewerId+"-"+Math.random().toString(36).slice(2);'
-            . '      valueEl.innerHTML = \'<div id="\'+id+\'"></div>\';'
-            . '      try{var ele=document.getElementById(id);var viewer=new GlycerineViewer(ele,{width:width,height:height,manifest:m});viewer.init();}catch(e){console.error("GlycerineViewer init error", e);}'
-            . '    }'
-            . '  }catch(e){}'
-            . '});'
-            . '}'
-            . '(document.readyState==="loading"?document.addEventListener("DOMContentLoaded",replaceAndInit):replaceAndInit());'
-            . '})();</script>';
+        echo $view->partial('common/glycerine-iiif-inline', [
+            'manifestUrls' => $manifestUrls,
+            'width' => self::DEFAULT_WIDTH,
+            'height' => self::DEFAULT_HEIGHT,
+            'viewerId' => $viewerId,
+        ]);
     }
 }

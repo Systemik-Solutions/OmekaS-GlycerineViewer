@@ -13,6 +13,7 @@ supports both automatic rendering from item metadata and manual embedding via si
 - Download a ZIP package from one of the [releases](https://github.com/Systemik-Solutions/OmekaS-GlycerineViewer/releases) 
 in this repository.
 - Extract the ZIP into the modules directory of your Omeka S installation.
+- Rename the extracted folder to `GlycerineIIIFViewer`.
 - In the Omeka S admin panel, navigate to Modules and click Install next to “Glycerine IIIF Viewer”.
 
 For detailed instructions, refer to the [Omeka S module installation guide](https://omeka.org/s/docs/user-manual/modules/).

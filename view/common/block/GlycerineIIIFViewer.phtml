@@ -2,25 +2,27 @@
 
 $iiifManifestUrl = $block->dataValue('iiifManifestUrl');
 $width = $block->dataValue('width') ?: '100%';
-$height = $block->dataValue('height') ?: '500px';
+$height = $block->dataValue('height') ?: '600px';
 
 if (empty($iiifManifestUrl)) {
     echo '<p>Please provide a IIIF Manifest URL in the block settings.</p>';
     return;
 }
 
-// Generate a unique/random ID for this viewer instance.
-$viewerId = 'glycerine-viewer-' . uniqid();
+// Generate a unique ID for this viewer instance.
+$viewerId = 'glycerine-viewer-' . uniqid('', true);
+$escapedViewerId = $this->escapeHtmlAttr($viewerId);
+$jsConfig = json_encode([
+    'width' => $width,
+    'height' => $height,
+    'manifest' => $iiifManifestUrl,
+], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG);
 ?>
 
-<div id="<?php echo $viewerId; ?>"></div>
+<div id="<?php echo $escapedViewerId; ?>"></div>
 
-<script>
-    const ele = document.getElementById('<?php echo $viewerId; ?>');
-    const viewer = new GlycerineViewer(ele, {
-        width: '<?php echo $width; ?>',
-        height: '<?php echo $height; ?>',
-        manifest: '<?php echo $iiifManifestUrl; ?>',
-    });
+<script>(function() {
+    var ele = document.getElementById(<?php echo json_encode($viewerId, JSON_HEX_TAG); ?>);
+    var viewer = new GlycerineViewer(ele, <?php echo $jsConfig; ?>);
     viewer.init();
-</script>
+})();</script>

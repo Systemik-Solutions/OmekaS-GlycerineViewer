@@ -1,0 +1,81 @@
+<?php
+/**
+ * Inline script for replacing IIIF manifest links/text with Glycerine Viewer instances.
+ *
+ * Variables: $manifestUrls (array), $width (string), $height (string), $viewerId (string)
+ */
+$jsManifests = json_encode($manifestUrls, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG);
+$jsWidth     = json_encode($width, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG);
+$jsHeight    = json_encode($height, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG);
+$jsViewerId  = json_encode($viewerId, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG);
+?>
+<script>
+(function() {
+    var manifests = <?php echo $jsManifests; ?>;
+    var width     = <?php echo $jsWidth; ?>;
+    var height    = <?php echo $jsHeight; ?>;
+    var viewerId  = <?php echo $jsViewerId; ?>;
+
+    function initViewer(container, manifestUrl) {
+        var id = viewerId + '-' + Math.random().toString(36).slice(2);
+        container.innerHTML = '<div id="' + id + '"></div>';
+        try {
+            var ele = document.getElementById(id);
+            var viewer = new GlycerineViewer(ele, {
+                width: width,
+                height: height,
+                manifest: manifestUrl
+            });
+            viewer.init();
+        } catch (e) {
+            console.error('GlycerineViewer init error', e);
+        }
+    }
+
+    function replaceAndInit() {
+        manifests.forEach(function(m) {
+            var sel = 'a[href="' + String(m).replace(/"/g, '\\"') + '"]';
+            document.querySelectorAll(sel).forEach(function(a) {
+                var valueEl = a.closest('.value') || a.parentElement;
+                if (!valueEl) {
+                    return;
+                }
+                initViewer(valueEl, m);
+            });
+
+            try {
+                var walker = document.createTreeWalker(
+                    document.body,
+                    NodeFilter.SHOW_TEXT,
+                    {
+                        acceptNode: function(n) {
+                            return (n.nodeValue || '').trim() === String(m)
+                                ? NodeFilter.FILTER_ACCEPT
+                                : NodeFilter.FILTER_REJECT;
+                        }
+                    }
+                );
+                var node;
+                while (node = walker.nextNode()) {
+                    var valueEl = (node.parentNode
+                        && node.parentNode.closest
+                        && node.parentNode.closest('.value'))
+                        || node.parentNode;
+                    if (!valueEl) {
+                        continue;
+                    }
+                    initViewer(valueEl, m);
+                }
+            } catch (e) {
+                console.error('GlycerineViewer DOM walk error', e);
+            }
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', replaceAndInit);
+    } else {
+        replaceAndInit();
+    }
+})();
+</script>

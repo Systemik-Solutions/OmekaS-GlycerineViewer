@@ -15,6 +15,6 @@ return [
     'form_elements' => [
         'invokables' => [
             GlycerineIIIFViewer\Form\ConfigForm::class => GlycerineIIIFViewer\Form\ConfigForm::class,
-        ]
+        ],
     ],
 ];
