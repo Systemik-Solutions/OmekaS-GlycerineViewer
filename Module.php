@@ -121,7 +121,7 @@ class Module extends AbstractModule
         $headScript = $viewHelperManager->get('headScript');
         $headLink = $viewHelperManager->get('headLink');
 
-      // Glycerine Viewer
+        // Glycerine Viewer
         $headScript->appendFile('https://unpkg.com/glycerine-viewer@latest/jslib/glycerine-viewer.umd.cjs');
         $headLink->appendStylesheet('https://unpkg.com/glycerine-viewer@latest/jslib/style.css');
     }
